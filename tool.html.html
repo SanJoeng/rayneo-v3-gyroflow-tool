@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>陀螺仪数据转换工具 (图形界面版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .file-drop-zone {
+            transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+        }
+        .file-drop-zone.dragover {
+            background-color: #e0e7ff; 
+            border-color: #4f46e5;
+        }
+        .dark .file-drop-zone.dragover {
+            background-color: #3730a3;
+            border-color: #a5b4fc;
+        }
+        #file-list li {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 space-y-6">
+        <div class="text-center">
+            <h1 class="text-3xl font-bold text-gray-800 dark:text-white">陀螺仪数据转换工具</h1>
+            <p class="text-gray-600 dark:text-gray-400 mt-2">为RayNeo V3视频生成Gyroflow所需的数据文件。</p>
+        </div>
+
+        <!-- Step 1: Upload Files -->
+        <div class="space-y-4">
+            <label class="text-lg font-semibold text-gray-700 dark:text-gray-300">第一步：选择文件</label>
+            <div id="drop-zone" class="file-drop-zone flex items-center justify-center w-full">
+                <label for="file-upload" class="flex flex-col items-center justify-center w-full h-56 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600">
+                    <div class="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center">
+                        <svg class="w-10 h-10 mb-4 text-gray-500 dark:text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg>
+                        <p class="mb-2 text-sm text-gray-500 dark:text-gray-400"><span class="font-semibold">点击选择</span> 或 将文件拖拽到此处</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">请同时选择 `..._D.txt`, `..._BASE.txt` 和 `info.json`</p>
+                    </div>
+                    <input id="file-upload" type="file" class="hidden" multiple/>
+                </label>
+            </div>
+            <div id="file-list-container" class="hidden">
+                 <h4 class="text-md font-medium text-gray-700 dark:text-gray-300">已选择文件:</h4>
+                 <ul id="file-list" class="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-400"></ul>
+            </div>
+        </div>
+        
+        <!-- Step 2: Convert & Download -->
+        <div>
+             <label class="text-lg font-semibold text-gray-700 dark:text-gray-300">第二步：生成文件</label>
+            <button id="convert-btn" class="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-all duration-300 transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:scale-100" disabled>
+                开始处理
+            </button>
+        </div>
+        
+        <!-- Results Section -->
+        <div id="results-section" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 class="text-xl font-bold text-gray-800 dark:text-white">处理完成！</h3>
+            <p id="status-message" class="text-md text-green-600 dark:text-green-400"></p>
+            <div class="grid sm:grid-cols-2 gap-4">
+                 <a id="download-gcsv" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-all duration-300 flex items-center justify-center" href="#">下载 .gcsv 文件</a>
+                 <a id="download-json" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-all duration-300 flex items-center justify-center" href="#">下载 .json 镜头配置</a>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- DOM Element References ---
+        const fileUpload = document.getElementById('file-upload');
+        const dropZone = document.getElementById('drop-zone');
+        const convertBtn = document.getElementById('convert-btn');
+        const resultsSection = document.getElementById('results-section');
+        const statusMessage = document.getElementById('status-message');
+        const fileListContainer = document.getElementById('file-list-container');
+        const fileList = document.getElementById('file-list');
+        const downloadGcsvLink = document.getElementById('download-gcsv');
+        const downloadJsonLink = document.getElementById('download-json');
+
+        let requiredFiles = {};
+        const CORRECT_ORIENTATION = "YxZ";
+
+        // --- Drag and Drop Logic ---
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
+        });
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+        });
+        dropZone.addEventListener('drop', (e) => {
+            fileUpload.files = e.dataTransfer.files;
+            handleFileSelection();
+        }, false);
+        fileUpload.addEventListener('change', handleFileSelection);
+        
+        // --- Main Functions ---
+        function handleFileSelection() {
+            requiredFiles = {};
+            fileList.innerHTML = '';
+            
+            const files = fileUpload.files;
+            if (files.length === 0) {
+                fileListContainer.classList.add('hidden');
+                convertBtn.disabled = true;
+                return;
+            }
+
+            fileListContainer.classList.remove('hidden');
+
+            for (const file of files) {
+                let fileType = null;
+                if (file.name.toLowerCase().startsWith("eis_") && file.name.toLowerCase().endsWith("_d.txt")) {
+                    fileType = "d_txt";
+                } else if (file.name.toLowerCase().startsWith("eis_") && file.name.toLowerCase().endsWith("_base.txt")) {
+                    fileType = "base_txt";
+                } else if (file.name.toLowerCase() === "info.json") {
+                    fileType = "info_json";
+                }
+
+                if (fileType) {
+                    requiredFiles[fileType] = file;
+                    const li = document.createElement('li');
+                    li.textContent = `✅ ${file.name}`;
+                    li.className = "text-green-500";
+                    fileList.appendChild(li);
+                }
+            }
+            
+            // Check if all required files are present
+            if (requiredFiles.d_txt && requiredFiles.base_txt && requiredFiles.info_json) {
+                convertBtn.disabled = false;
+            } else {
+                convertBtn.disabled = true;
+                const li = document.createElement('li');
+                li.textContent = `❌ 缺少必须的文件。请确保已选择 _D.txt, _BASE.txt, 和 info.json。`;
+                li.className = "text-red-500 font-semibold";
+                fileList.appendChild(li);
+            }
+        }
+
+        async function processFiles() {
+            convertBtn.disabled = true;
+            convertBtn.textContent = "正在处理...";
+            resultsSection.classList.add('hidden');
+
+            try {
+                const d_txt_content = await requiredFiles.d_txt.text();
+                const base_txt_content = await requiredFiles.base_txt.text();
+                const info_json_content = await requiredFiles.info_json.text();
+
+                const { gyro_data, metadata_from_d } = parse_d_txt_comprehensive(d_txt_content);
+                const metadata_from_others = parse_additional_metadata(base_txt_content, info_json_content);
+                const metadata = { ...metadata_from_d, ...metadata_from_others };
+                
+                const gcsvContent = generateGCSV(gyro_data, metadata);
+                const jsonContent = generateFinalLensProfileJSON(metadata);
+
+                const baseFilename = requiredFiles.d_txt.name.split('.')[0].replace("_D", "");
+                
+                setupDownload(downloadGcsvLink, `${baseFilename}.gcsv`, gcsvContent, 'text/csv');
+                setupDownload(downloadJsonLink, `${baseFilename}_final_lens_profile.json`, jsonContent, 'application/json');
+                
+                statusMessage.textContent = `成功处理了 ${gyro_data.length} 个陀螺仪样本！`;
+                resultsSection.classList.remove('hidden');
+
+            } catch (e) {
+                alert(`处理失败: ${e.message}`);
+                console.error(e);
+            } finally {
+                convertBtn.disabled = false;
+                convertBtn.textContent = "开始处理";
+            }
+        }
+
+        convertBtn.addEventListener('click', processFiles);
+
+        // --- Parsing Logic (Ported from Python) ---
+        function parse_d_txt_comprehensive(text) {
+            const gyro_data = [];
+            const metadata = {};
+            const lines = text.split(/\r?\n/);
+
+            const gyro_regex = /TimeStamp:(\d+),value:([^,]+),SensorType:4/;
+            const frame_regex = /FrameIndex:\d+,TimeStamp:(\d+)/;
+            const shutter_skew_regex = /ShutterSkew:(\d+)/;
+            const focal_length_regex = /FocalLength:([\d\.]+)/;
+
+            for (const line of lines) {
+                let match = line.match(gyro_regex);
+                if (match) {
+                    const timestamp_ns = parseInt(match[1], 10);
+                    const values = match[2].split(';');
+                    const [gx, gy, gz] = values.slice(0, 3).map(parseFloat);
+                    gyro_data.push({ timestamp_ns, gx, gy, gz });
+                    continue;
+                }
+                
+                match = line.match(frame_regex);
+                if (match) {
+                    if (!metadata.shutter_skew) {
+                        const skew_match = line.match(shutter_skew_regex);
+                        if (skew_match) metadata.shutter_skew = parseInt(skew_match[1], 10);
+                    }
+                    if (!metadata.focal_length) {
+                        const fl_match = line.match(focal_length_regex);
+                        if (fl_match) metadata.focal_length = parseFloat(fl_match[1]);
+                    }
+                }
+            }
+            if (gyro_data.length === 0) throw new Error("_D.txt 文件中未找到 SensorType:4 的陀螺仪数据。");
+            gyro_data.sort((a, b) => a.timestamp_ns - b.timestamp_ns);
+            return { gyro_data, metadata_from_d: metadata };
+        }
+
+        function parse_additional_metadata(base_txt, info_json) {
+            const metadata = {};
+            let match = base_txt.match(/PhysicalSize:\[([\d\.]+)-([\d\.]+)\]/);
+            if (match) {
+                metadata.sensor_width = parseFloat(match[1]);
+                metadata.sensor_height = parseFloat(match[2]);
+            }
+            match = base_txt.match(/PixelArraySize:\[(\d+)-(\d+)\]/);
+            if (match) {
+                metadata.image_width = parseInt(match[1], 10);
+                metadata.image_height = parseInt(match[2], 10);
+            }
+            const info = JSON.parse(info_json);
+            metadata.fps = info.fps || 29.97;
+            metadata.calib_width = info.width || 2400;
+            metadata.calib_height = info.height || 1344;
+            return metadata;
+        }
+
+        function generateGCSV(data, metadata) {
+            const first_timestamp_ns = data.length > 0 ? data[0].timestamp_ns : 0;
+            let content = 'GYROFLOW IMU LOG\r\n';
+            content += 'version,1.3\r\n';
+            content += 'id,CustomEISLogger\r\n';
+            content += `orientation,${CORRECT_ORIENTATION}\r\n`;
+            if (metadata.shutter_skew) {
+                const readout_ms = metadata.shutter_skew / 1000000.0;
+                content += `frame_readout_time,${readout_ms.toFixed(4)}\r\n`;
+            }
+            content += 'gscale,1.0\r\n';
+            content += 'tscale,0.001\r\n';
+            content += 't,gx,gy,gz\r\n';
+
+            for (const d of data) {
+                const time_ms = (d.timestamp_ns - first_timestamp_ns) / 1000000.0;
+                content += `${time_ms.toFixed(3)},${d.gx.toFixed(6)},${d.gy.toFixed(6)},${d.gz.toFixed(6)}\r\n`;
+            }
+            return content;
+        }
+        
+        function generateFinalLensProfileJSON(metadata) {
+            const profile = {
+              "name": "RayNeo_V3_IMX681__2k_16by9_2400x1344-29.97fps",
+              "note": "Final profile combining calibrated data with dynamically extracted metadata.",
+              "calibrated_by": "San Joeng", "camera_brand": "RayNeo", "camera_model": "V3", "lens_model": "IMX681",
+              "camera_setting": "",
+              "calib_dimension": { "w": metadata.calib_width || 2400, "h": metadata.calib_height || 1344 },
+              "orig_dimension": { "w": metadata.image_width || 2400, "h": metadata.image_height || 1344 },
+              "output_dimension": { "w": metadata.calib_width || 2400, "h": metadata.calib_height || 1344 },
+              "frame_readout_time": (metadata.shutter_skew || 0) / 1000000.0,
+              "frame_readout_direction": "TopToBottom", "gyro_lpf": null, "input_horizontal_stretch": 1.0, "input_vertical_stretch": 1.0,
+              "num_images": 15, "fps": metadata.fps, "crop": null, "official": false, "asymmetrical": false,
+              "fisheye_params": {
+                "RMS_error": 0.4294243819710179,
+                "camera_matrix": [
+                  [1146.6817864492118, 0.0, 1198.184123927221],
+                  [0.0, 1143.0485308408684, 683.1106735346044],
+                  [0.0, 0.0, 1.0]
+                ],
+                "distortion_coeffs": [0.25042637237421467, 0.561834527611872, -1.4730620460566122, 1.835199944737525],
+                "radial_distortion_limit": null
+              },
+              "identifier": "", "calibrator_version": "1.6.1", "date": new Date().toISOString().split('T')[0],
+              "compatible_settings": [], "sync_settings": null, "distortion_model": null, "digital_lens": null,
+              "digital_lens_params": null, "interpolations": null, "focal_length": metadata.focal_length,
+              "crop_factor": null, "global_shutter": false
+            };
+            return JSON.stringify(profile, null, 2);
+        }
+
+        // --- Utility Functions ---
+        function setupDownload(linkElement, filename, content, mimeType) {
+            const blob = new Blob([content], { type: `${mimeType};charset=utf-8;` });
+            linkElement.href = URL.createObjectURL(blob);
+            linkElement.download = filename;
+        }
+    </script>
+</body>
+</html>
